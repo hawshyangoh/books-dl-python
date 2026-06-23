@@ -1,6 +1,6 @@
 """Port of lib/books_dl/api.rb.
 
-Handles authentication (Selenium-assisted slider captcha, or manual captcha
+Handles authentication (Playwright-assisted slider captcha, or manual captcha
 fallback), fake-device registration, the OAuth handshake that yields a
 ``CmsToken``, fetching the per-book download token, and downloading +
 decrypting individual resources.
@@ -143,12 +143,12 @@ class API:
         if self.logged():
             return
 
-        # Try Selenium-assisted login first (handles the slider captcha).
+        # Try Playwright-assisted login first (handles the slider captcha).
         if self._login_with_slider_captcha():
-            print("🎉 使用 Selenium 自動登入成功")
+            print("🎉 使用 Playwright 自動登入成功")
             return
 
-        print("⚠️ Selenium 失敗，改用人工輸入驗證碼模式")
+        print("⚠️ Playwright 失敗，改用人工輸入驗證碼模式")
         username, password = self._get_account_from_stdin()
         login_page = self._get(self.LOGIN_PAGE_URL).text
         captcha = self._get_captcha_from(login_page)
@@ -255,47 +255,53 @@ class API:
         except Exception:
             print("開啟失敗，請自行查看 captcha.png 檔案。")
 
-    # ------------------------------------------------------ selenium login
+    # ------------------------------------------------------ playwright login
     def _login_with_slider_captcha(self):
         try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.chrome.service import Service
+            from playwright.sync_api import sync_playwright
         except ImportError:
             return False
 
-        options = Options()
-        binary = os.environ.get("CHROME_BINARY")
-        if binary:
-            options.binary_location = binary
-        for arg in (
+        launch_args = [
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
             "--disable-software-rasterizer",
-            "--window-size=1280,800",
-        ):
-            options.add_argument(arg)
+        ]
+        launch_opts = {"headless": False, "args": launch_args}
 
-        driver_path = os.environ.get("CHROMEDRIVER")
-        service = Service(executable_path=driver_path) if driver_path else None
+        # Use a system Chrome/Chromium instead of Playwright's bundled build:
+        #   CHROME_BINARY=/path/to/chrome   (explicit executable)
+        #   CHROME_CHANNEL=chrome|msedge|chromium-beta ...
+        binary = os.environ.get("CHROME_BINARY")
+        channel = os.environ.get("CHROME_CHANNEL")
+        if binary:
+            launch_opts["executable_path"] = binary
+        elif channel:
+            launch_opts["channel"] = channel
 
-        driver = None
         try:
-            driver = webdriver.Chrome(options=options, service=service)
-            driver.get(self.LOGIN_PAGE_URL)
-            input("請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續...")
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(**launch_opts)
+                try:
+                    context = browser.new_context(
+                        viewport={"width": 1280, "height": 800},
+                        user_agent=self.DEFAULT_USER_AGENT,
+                    )
+                    page = context.new_page()
+                    page.goto(self.LOGIN_PAGE_URL)
+                    input("請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續...")
 
-            for cookie in driver.get_cookies():
-                self.current_cookie[cookie["name"]] = cookie["value"]
+                    for cookie in context.cookies():
+                        self.current_cookie[cookie["name"]] = cookie["value"]
+                finally:
+                    browser.close()
 
             with open(self.COOKIE_FILE_NAME, "w", encoding="utf-8") as fh:
                 json.dump(self.current_cookie, fh, ensure_ascii=False, indent=2)
             return True
         except Exception as exc:  # noqa: BLE001
-            print(f"[Selenium] 登入失敗：{type(exc).__name__} - {exc}")
+            print(f"[Playwright] 登入失敗：{type(exc).__name__} - {exc}")
+            print("提示：首次使用請先執行 `playwright install chromium`")
             return False
-        finally:
-            if driver is not None:
-                driver.quit()

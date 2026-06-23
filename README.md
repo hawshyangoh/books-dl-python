@@ -11,10 +11,11 @@ standard `.epub`.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt   # requests (required), selenium (optional)
+pip install -r requirements.txt   # requests (required), playwright (optional)
+playwright install chromium        # only if using the automated login
 ```
 
-`selenium` is only needed for the automated slider-captcha login. If it's not
+`playwright` is only needed for the automated slider-captcha login. If it's not
 installed, the tool falls back to a manual image-captcha prompt.
 
 ## Get a `book_id`
@@ -33,22 +34,22 @@ python main.py E050096232_reflowable_normal
 # or edit DEFAULT_BOOK_ID in main.py and run: python main.py
 ```
 
-On first run a browser opens (Selenium path): log in and complete the slider
+On first run a browser opens (Playwright path): log in and complete the slider
 captcha manually, then press **Enter** in the terminal. Session cookies are
 cached to `cookie.json` for subsequent runs. The finished `.epub` is written to
 the current directory.
 
-### Selenium / Chrome paths
+### Playwright / Chrome options
 
-Optional environment variables:
+By default Playwright uses its own bundled Chromium (`playwright install chromium`).
+To use a system browser instead, set one of:
 
-- `CHROME_BINARY` — path to the Chrome/Chromium binary.
-- `CHROMEDRIVER` — path to a chromedriver executable (otherwise Selenium Manager
-  resolves one automatically).
+- `CHROME_BINARY` — path to a Chrome/Chromium executable.
+- `CHROME_CHANNEL` — a Playwright channel, e.g. `chrome`, `msedge`, `chromium-beta`.
 
 ## How it works
 
-1. **Login** – Selenium-assisted (slider captcha) or manual captcha fallback.
+1. **Login** – Playwright-assisted (slider captcha) or manual captcha fallback.
 2. **DeviceReg** – registers a fake web device.
 3. **OAuth** – obtains a `CmsToken` and per-book `download_token`.
 4. **Download** – fetches `META-INF/container.xml`, the OPF root file, and every

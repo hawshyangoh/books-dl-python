@@ -1,3 +1,4 @@
 requests>=2.32.0
 # Optional: only needed for the automated slider-captcha login flow.
-selenium>=4.20.0
+# After installing, run once: playwright install chromium
+playwright>=1.49.0
