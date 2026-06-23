@@ -7,5 +7,6 @@ env/
 
 # Runtime artifacts
 cookie.json
+.books_ua
 captcha.png
 *.epub

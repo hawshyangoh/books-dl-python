@@ -22,7 +22,9 @@ import zipfile
 from dataclasses import dataclass
 from urllib.parse import quote_plus, unquote_plus, urlparse
 
-import requests
+# curl_cffi impersonates a real Chrome TLS handshake, which is required to get
+# past Cloudflare's bot protection on cart.books.com.tw (the OAuth host).
+from curl_cffi import requests
 
 
 class BooksDLError(Exception):
@@ -190,17 +192,29 @@ class BooksDL:
     OAUTH_ENDPOINT_URL = "https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/MemberLogin?code="
     BOOK_DL_URL = "https://appapi-ebook.books.com.tw/V1.7/CMSAPIApp/BookDownLoadURL"
 
-    USER_AGENT = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
+    # A current Chrome UA; the original 2018-era "Chrome 71" string gets 403'd.
+    # The real browser UA captured at login is preferred (see _load_ua / login).
+    DEFAULT_UA = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/71.0.3578.98 Safari/537.36"
+        "Chrome/125.0.0.0 Safari/537.36"
     )
+    UA_FILE = ".books_ua"
+
+    # curl_cffi TLS impersonation target (passes Cloudflare).
+    IMPERSONATE = os.environ.get("BOOKS_IMPERSONATE", "chrome")
+
+    # Books.com.tw revoked download permission for "WEB" devices; register as a
+    # desktop/app device instead. Permitted: Windows, MAC, iOS, APP.
+    OS_TYPE = os.environ.get("BOOKS_OS_TYPE", "Windows")
 
     def __init__(self, book_id):
         self.book_id = book_id
         self.session = requests.Session()
         self._info = None
         self.cookies = self._load_cookies()
+        # Prefer the UA captured at login (must match the cf_clearance cookie).
+        self.user_agent = os.environ.get("BOOKS_USER_AGENT") or self._load_ua() or self.DEFAULT_UA
         # Triggers the full login + device-reg + OAuth + token flow.
         self.encoded_token = quote_plus(str(self.info.get("download_token") or ""))
 
@@ -272,8 +286,8 @@ class BooksDL:
         data = {
             "device_id": "2b2475e7-da58-4cfe-aedf-ab4e6463757b",
             "language": "zh-TW",
-            "os_type": "WEB",
-            "os_version": self.USER_AGENT,
+            "os_type": self.OS_TYPE,
+            "os_version": self.user_agent,
             "screen_resolution": "1680X1050",
             "screen_dpi": "96",
             "device_vendor": "Google Inc.",
@@ -297,7 +311,15 @@ class BooksDL:
 
         print("透過 OAuth 取得 CmsToken...")
         login_uri = json.loads(self._get(self.OAUTH_URL).text)["login_uri"]
-        code = self._get(login_uri).headers["Location"].split("&code=")[-1]
+        resp = self._get(login_uri)
+        location = resp.headers.get("Location")
+        if not location or "&code=" not in location:
+            raise BooksDLError(
+                "OAuth 未取得 code（可能未登入或被擋）。\n"
+                f"login_uri: {login_uri}\nStatus: {resp.status_code}\n"
+                f"Location: {location}"
+            )
+        code = location.split("&code=")[-1]
         self._get(f"{self.OAUTH_ENDPOINT_URL}{code}")
 
         resp = self._get(f"{self.BOOK_DL_URL}?book_uni_id={self.book_id}&t={int(time.time())}")
@@ -345,14 +367,32 @@ class BooksDL:
             return {}
 
     def _save_cookies(self, response):
-        for cookie in response.cookies:
-            self.cookies[cookie.name] = cookie.value
+        for name, value in response.cookies.items():
+            self.cookies[name] = value
         with open(self.COOKIE_FILE, "w", encoding="utf-8") as fh:
             json.dump(self.cookies, fh, ensure_ascii=False, indent=2)
 
+    def _load_ua(self):
+        try:
+            with open(self.UA_FILE, "r", encoding="utf-8") as fh:
+                return fh.read().strip() or None
+        except Exception:
+            return None
+
+    def _save_ua(self):
+        try:
+            with open(self.UA_FILE, "w", encoding="utf-8") as fh:
+                fh.write(self.user_agent)
+        except Exception:
+            pass
+
     def _headers(self, extra=None):
-        h = {"user-agent": self.USER_AGENT,
-             "Cookie": "; ".join(f"{k}={v}" for k, v in self.cookies.items())}
+        # Browser-like defaults so the OAuth host's bot filter doesn't 403 us.
+        h = {
+            "user-agent": self.user_agent,
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cookie": "; ".join(f"{k}={v}" for k, v in self.cookies.items()),
+        }
         if extra:
             h.update(extra)
         return h
@@ -361,16 +401,21 @@ class BooksDL:
         # allow_redirects=False mirrors the Ruby HTTP gem; the OAuth step reads
         # the 302 Location header directly, and logged() relies on a 200 check.
         self.session.cookies.clear()
-        resp = self.session.get(url, headers=self._headers(headers), allow_redirects=False)
+        resp = self.session.get(url, headers=self._headers(headers),
+                                allow_redirects=False, impersonate=self.IMPERSONATE)
         if resp.status_code >= 400:
             name = urlparse(url).path.rsplit("/", 1)[-1]
-            raise BooksDLError(f"取得 `{name}` 失敗。 Status: {resp.status_code}")
+            snippet = resp.text[:300].replace("\n", " ")
+            raise BooksDLError(
+                f"取得 `{name}` 失敗。 Status: {resp.status_code}\nURL: {url}\n回應: {snippet}"
+            )
         self._save_cookies(resp)
         return resp
 
     def _post(self, url, data=None, headers=None):
         self.session.cookies.clear()
-        resp = self.session.post(url, data=data or {}, headers=self._headers(headers), allow_redirects=False)
+        resp = self.session.post(url, data=data or {}, headers=self._headers(headers),
+                                 allow_redirects=False, impersonate=self.IMPERSONATE)
         self._save_cookies(resp)
         return resp
 
@@ -444,12 +489,17 @@ class BooksDL:
                     context.add_init_script(
                         "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
                     )
-                    context.new_page().goto(self.LOGIN_PAGE_URL)
+                    page = context.new_page()
+                    page.goto(self.LOGIN_PAGE_URL)
+                    # The cf_clearance cookie is bound to this browser's UA, so the
+                    # HTTP layer must reuse the exact same string.
+                    self.user_agent = page.evaluate("() => navigator.userAgent")
                     input("請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續...")
                     for cookie in context.cookies():
                         self.cookies[cookie["name"]] = cookie["value"]
                 finally:
                     browser.close()
+            self._save_ua()
 
             with open(self.COOKIE_FILE, "w", encoding="utf-8") as fh:
                 json.dump(self.cookies, fh, ensure_ascii=False, indent=2)

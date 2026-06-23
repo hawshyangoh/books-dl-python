@@ -1,4 +1,6 @@
-requests>=2.32.0
-# Optional: only needed for the automated slider-captcha login flow.
+# curl_cffi impersonates Chrome's TLS handshake to get past Cloudflare on the
+# OAuth host (plain requests gets a 403 there).
+curl_cffi>=0.7.0
+# Only needed for the automated slider-captcha login flow.
 # After installing, run once: playwright install chromium
 playwright>=1.49.0
