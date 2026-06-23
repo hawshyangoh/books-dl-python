@@ -408,29 +408,41 @@ class BooksDL:
         except ImportError:
             return False
 
+        # Strip the automation fingerprints that make Books.com.tw disable the
+        # login button / refuse to validate the slider captcha.
+        args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+        ]
         launch_opts = {
             "headless": False,
-            "args": [
-                "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-                "--disable-gpu", "--disable-software-rasterizer",
-            ],
+            "args": args,
+            "ignore_default_args": ["--enable-automation"],
         }
-        # Use a system browser instead of Playwright's bundled Chromium:
-        #   CHROME_BINARY=/path/to/chrome   or   CHROME_CHANNEL=chrome|msedge|...
         binary = os.environ.get("CHROME_BINARY")
-        channel = os.environ.get("CHROME_CHANNEL")
-        if binary:
-            launch_opts["executable_path"] = binary
-        elif channel:
-            launch_opts["channel"] = channel
+        # Prefer a real installed Chrome over Playwright's "Chrome for Testing"
+        # build (which is more readily flagged as a bot). Override with
+        # CHROME_CHANNEL=msedge|chrome-beta|chromium, or CHROME_BINARY=/path.
+        channel = os.environ.get("CHROME_CHANNEL", "chrome")
 
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(**launch_opts)
+                if binary:
+                    browser = pw.chromium.launch(executable_path=binary, **launch_opts)
+                else:
+                    try:
+                        browser = pw.chromium.launch(channel=channel, **launch_opts)
+                    except Exception:
+                        # Real Chrome not installed -> fall back to bundled Chromium.
+                        print("找不到系統 Chrome，改用內建 Chromium "
+                              "(若驗證失敗請安裝 Google Chrome)。")
+                        browser = pw.chromium.launch(**launch_opts)
                 try:
-                    context = browser.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        user_agent=self.USER_AGENT,
+                    context = browser.new_context(viewport={"width": 1280, "height": 900})
+                    # Hide navigator.webdriver from the page's JS.
+                    context.add_init_script(
+                        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
                     )
                     context.new_page().goto(self.LOGIN_PAGE_URL)
                     input("請在瀏覽器中手動輸入帳號、密碼並完成滑塊驗證，完成後請按 Enter 繼續...")
