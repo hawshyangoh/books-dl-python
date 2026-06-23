@@ -1,0 +1,3 @@
+requests>=2.32.0
+# Optional: only needed for the automated slider-captcha login flow.
+selenium>=4.20.0
