@@ -7,11 +7,22 @@ standard `.epub`.
 > 僅供個人非商業用途，請先至網站購買電子書。下載期間請勿在 Books.com.tw 進行其他瀏覽器操作
 > （電子書區不允許多裝置同時登入）。
 
+> ✅ **Working as of 2026-06-23** — verified end-to-end against a real purchased
+> book (full 309-file title → ~42 MB, zip-validated `.epub`). The crypto port is
+> byte-exact against the upstream RSpec fixtures.
+
+## Requirements
+
+- Python 3.9+
+- [`curl_cffi`](https://pypi.org/project/curl-cffi/) — required
+- [`playwright`](https://pypi.org/project/playwright/) — optional (automated login)
+- Google Chrome installed (recommended, for the login browser)
+
 ## Install
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt   # curl_cffi (required), playwright (optional)
+pip install -r requirements.txt
 playwright install chromium        # only if using the automated login
 ```
 
@@ -36,29 +47,11 @@ python main.py E050096232_reflowable_normal
 # or edit DEFAULT_BOOK_ID in main.py and run: python main.py
 ```
 
-On first run a browser opens (Playwright path): log in and complete the slider
-captcha manually, then press **Enter** in the terminal. Session cookies are
-cached to `cookie.json` for subsequent runs. The finished `.epub` is written to
-the current directory.
-
-### Playwright / Chrome options
-
-By default Playwright uses its own bundled Chromium (`playwright install chromium`).
-To use a system browser instead, set one of:
-
-- `CHROME_BINARY` — path to a Chrome/Chromium executable.
-- `CHROME_CHANNEL` — a Playwright channel, e.g. `chrome`, `msedge`, `chromium-beta`.
-
-### Other environment overrides
-
-- `BOOKS_OS_TYPE` — device type registered with the API (default `Windows`).
-  Books.com.tw **revoked download permission for `WEB` devices**; permitted
-  values are `Windows`, `MAC`, `iOS`, `APP`. Using `WEB` returns
-  `web device has no permission`.
-- `BOOKS_USER_AGENT` — override the HTTP User-Agent. Normally captured
-  automatically from the login browser (it must match the `cf_clearance`
-  cookie) and cached in `.books_ua`.
-- `BOOKS_IMPERSONATE` — curl_cffi TLS target (default `chrome`).
+On first run a Chrome window opens: log in and complete the slider captcha
+manually, then press **Enter** in the terminal. Session cookies are cached to
+`cookie.json` (and the browser User-Agent to `.books_ua`) so later runs reuse the
+session. The finished `.epub` is written to the current directory as
+`<book_id>_<title>.epub`.
 
 ## How it works
 
@@ -74,6 +67,30 @@ To use a system browser instead, set one of:
    resource path. Images/fonts/CSS are fetched as-is.
 5. **Package** – zips everything into a spec-compliant `.epub` (`mimetype` stored
    first, uncompressed).
+
+## Configuration (environment variables)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BOOKS_OS_TYPE` | `Windows` | Device type registered with the API. `WEB` is **blocked** by Books.com.tw; use `Windows`, `MAC`, `iOS`, or `APP`. |
+| `BOOKS_USER_AGENT` | captured at login | HTTP User-Agent. Must match the `cf_clearance` cookie; normally auto-captured and cached in `.books_ua`. |
+| `BOOKS_IMPERSONATE` | `chrome` | curl_cffi TLS impersonation target. |
+| `CHROME_BINARY` | — | Path to a Chrome/Chromium executable for the login browser. |
+| `CHROME_CHANNEL` | `chrome` | Playwright channel, e.g. `chrome`, `msedge`, `chromium-beta`. |
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| Login button / slider won't respond | The site detects automation. The tool launches real Chrome with automation flags stripped; make sure Google Chrome is installed (or set `CHROME_BINARY`). |
+| `取得 \`oauth\` 失敗。 Status: 403` | Cloudflare blocking a non-browser TLS fingerprint. Ensure `curl_cffi` is installed (it's required). |
+| `web device has no permission` | `os_type=WEB` is no longer allowed. The default is now `Windows`; override with `BOOKS_OS_TYPE` if needed. |
+| `Device not Registered` | Stale session — delete `cookie.json` and log in again. |
+| Repeated browser logins | `cookie.json`/`.books_ua` missing or expired; a fresh login refreshes them. |
+
+> **Device limit:** the registered device id is shared/hardcoded. Books.com.tw
+> limits concurrent devices per account, so downloading here consumes a device
+> slot. If the official app later asks you to remove a device, that's why.
 
 ## Project layout
 
