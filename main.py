@@ -1,4 +1,4 @@
-"""Port of main.rb.
+"""Entry point. Port of main.rb.
 
 如何取得 book_id:
     進入你要下載的書的閱讀頁面，取得網址列中網址，例如：
@@ -12,15 +12,14 @@
 
 import sys
 
-from books_dl import Downloader
+from books_dl import BooksDL
 
 DEFAULT_BOOK_ID = "E050260238_reflowable_trial"
 
 
 def main():
     book_id = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BOOK_ID
-    downloader = Downloader(book_id)
-    downloader.perform()
+    BooksDL(book_id).download()
 
 
 if __name__ == "__main__":

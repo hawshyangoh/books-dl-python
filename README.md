@@ -62,16 +62,15 @@ To use a system browser instead, set one of:
 ## Project layout
 
 ```
-books_dl/
-  utils.py            # crypto: key derivation + XOR (verified against upstream fixtures)
-  base_file.py        # path + bytes container
-  api.py              # auth, OAuth, fetch + decrypt
-  downloader.py       # orchestration + epub build
-  files/
-    container.py      # parse META-INF/container.xml
-    content.py        # parse OPF (item hrefs + title)
-main.py
+books_dl.py   # everything: crypto, XML parsing, auth/OAuth, fetch+decrypt, epub build
+main.py       # CLI entry point
 ```
 
-The `utils` crypto port is byte-exact against the upstream RSpec fixtures
+`books_dl.py` exposes:
+
+- `generate_key`, `hex_to_byte`, `decode_xor`, `img_checksum` — crypto helpers
+- `parse_container`, `parse_opf` — XML parsing
+- `BooksDL(book_id).download()` — the full flow
+
+The crypto port is byte-exact against the upstream RSpec fixtures
 (`generate_key`, `hex_to_byte`, `decode_xor`).
